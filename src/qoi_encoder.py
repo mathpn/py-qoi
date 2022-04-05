@@ -123,7 +123,7 @@ def main(img_path: str, srgb: bool):
         out_array[write_pos + 3] = px_value[2]
         write_pos += 4
 
-    # TODO final padding
+    write_pos = write_end(out_array, write_pos)
     return out_array[0:write_pos]
 
 
