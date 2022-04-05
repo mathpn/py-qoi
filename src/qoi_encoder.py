@@ -7,6 +7,7 @@ def hash_pixel(values) -> int:
     r, g, b, a = values
     return (r * 3 + g * 5 + b * 7 + a * 11) % 64
 
+
 # chunk tags
 QOI_OP_INDEX = 0x00  # 00xxxxxx
 QOI_OP_DIFF = 0x40  # 01xxxxxx
@@ -17,9 +18,27 @@ QOI_OP_RGBA = 0xff  # 11111111
 QOI_MASK_2 = 0xc0  # 11000000
 
 
-def main(img_path: str):
+QOI_MAGIC = ord('q') << 24 | ord('o') << 16 | ord('i') << 8 | ord('f')
+
+
+def write_32_bits(value: int, array: bytearray, write_pos: int) -> int:
+    array[write_pos + 0] = (0xff000000 & value) >> 24
+    array[write_pos + 1] = (0x00ff0000 & value) >> 16
+    array[write_pos + 2] = (0x0000ff00 & value) >> 8
+    array[write_pos + 3] = (0x000000ff & value)
+    return write_pos + 4
+
+
+def write_end(array: bytearray, write_pos: int) -> int:
+    array[write_pos:write_pos + 7] = bytearray(0)
+    array[write_pos + 7] = 1
+    return write_pos + 8
+
+
+def main(img_path: str, srgb: bool):
     img = Image.open(img_path)
-    size = img.size[0] * img.size[1]
+    size = img.size
+    total_size = size[0] * size[1]
     if img.mode == 'RGBA':
         alpha = True
     elif img.mode == 'RGB':
@@ -27,9 +46,18 @@ def main(img_path: str):
     else:
         raise ValueError(f'Image of non-supported mode: {img.mode}')
     pixel_data = img.getdata()
-    out_array = bytearray(14 + size * (5 if alpha else 4) + 8)
+    out_array = bytearray(14 + total_size * (5 if alpha else 4) + 8)
     hash_array = [array.array('h', [0] * 4) for _ in range(64)]
-    # TODO write header
+
+    # write header
+    write_pos = 0
+    write_pos = write_32_bits(QOI_MAGIC, out_array, write_pos)
+    write_pos = write_32_bits(size[0], out_array, write_pos)
+    write_pos = write_32_bits(size[1], out_array, write_pos)
+    out_array[write_pos] = 4 if alpha else 3
+    out_array[write_pos + 1] = 0 if srgb else 1
+
+    # encode pixels
     run = 0
     prev_px_value = array.array('h', [0, 0, 0, 255])
     px_value = array.array('h', [0, 0, 0, 255])
