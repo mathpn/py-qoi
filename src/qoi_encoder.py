@@ -3,11 +3,6 @@ import array
 from PIL import Image
 
 
-def hash_pixel(values) -> int:
-    r, g, b, a = values
-    return (r * 3 + g * 5 + b * 7 + a * 11) % 64
-
-
 # chunk tags
 QOI_OP_INDEX = 0x00  # 00xxxxxx
 QOI_OP_DIFF = 0x40  # 01xxxxxx
@@ -19,6 +14,11 @@ QOI_MASK_2 = 0xc0  # 11000000
 
 
 QOI_MAGIC = ord('q') << 24 | ord('o') << 16 | ord('i') << 8 | ord('f')
+
+
+def hash_pixel(values) -> int:
+    r, g, b, a = values
+    return (r * 3 + g * 5 + b * 7 + a * 11) % 64
 
 
 def write_32_bits(value: int, array: bytearray, write_pos: int) -> int:
@@ -35,25 +35,34 @@ def write_end(array: bytearray, write_pos: int) -> int:
     return write_pos + 8
 
 
-def main(img_path: str, srgb: bool):
-    img = Image.open(img_path)
-    size = img.size
-    total_size = size[0] * size[1]
+def encode_img(img: Image.Image, srgb: bool):
+    width, height = img.size
     if img.mode == 'RGBA':
         alpha = True
     elif img.mode == 'RGB':
         alpha = False
     else:
         raise ValueError(f'Image of non-supported mode: {img.mode}')
-    pixel_data = img.getdata()
+    img_bytes = img.tobytes()
+    output = encode(img_bytes, width, height, alpha, srgb)
+    return output
+
+
+def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
+    total_size = height * width
+    channels = 4 if alpha else 3
+    pixel_data = (
+        tuple(img_bytes[i:i + channels])
+        for i in range(0, len(img_bytes), channels)
+    )
     out_array = bytearray(14 + total_size * (5 if alpha else 4) + 8)
     hash_array = [array.array('h', [0] * 4) for _ in range(64)]
 
     # write header
     write_pos = 0
     write_pos = write_32_bits(QOI_MAGIC, out_array, write_pos)
-    write_pos = write_32_bits(size[0], out_array, write_pos)
-    write_pos = write_32_bits(size[1], out_array, write_pos)
+    write_pos = write_32_bits(width, out_array, write_pos)
+    write_pos = write_32_bits(height, out_array, write_pos)
     out_array[write_pos] = 4 if alpha else 3
     out_array[write_pos + 1] = 0 if srgb else 1
 
@@ -128,4 +137,7 @@ def main(img_path: str, srgb: bool):
 
 
 if __name__ == '__main__':
-    main('jpeg_img.jpg')
+    img = Image.open('jpeg_img.jpg')
+    output = encode_img(img, True)
+    with open('test.qoi', 'wb') as qoi:
+        qoi.write(output)
