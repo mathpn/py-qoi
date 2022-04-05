@@ -68,12 +68,12 @@ def main(img_path: str, srgb: bool):
         if len(px) == 4:
             px_value = array.array('h', px)
         else:
-            for i in range(3):
-                px_value[i] = px[i]
+            for j in range(3):
+                px_value[j] = px[j]
 
         if px_value == prev_px_value:
             run += 1
-            if run == 62 or i == size:
+            if run == 62 or (i + 1) >= total_size:
                 out_array[write_pos] = QOI_OP_RUN | (run - 1)
                 write_pos += 1
                 run = 0
