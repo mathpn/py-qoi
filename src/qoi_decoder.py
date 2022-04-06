@@ -80,6 +80,7 @@ def decode(file_bytes: bytes):
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_INDEX:
+            # FIXME values from hash_array seem incorrect
             print(f'{b1 = } | {px_value = } | {hash_array[b1] = }')
             px_value[:] = hash_array[b1]
             continue
