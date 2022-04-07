@@ -39,20 +39,16 @@ def decode(file_bytes: bytes):
     read_pos += 1
     colorspace = file_bytes[read_pos]
     read_pos += 1
-    print(f'{read_pos = }')
 
     hash_array = [array.array('h', [0, 0, 0, 255]) for _ in range(64)]
     out_size = width * height * channels
     pixel_data = bytearray(out_size)
     px_value = array.array('h', [0, 0, 0, 255])
     run = 0
-    read_pos = 14
-    for i in range(0, out_size, channels):
-        if not run:
-            index_pos = hash_pixel(px_value)
-            hash_array[index_pos][:] = px_value
-        if i > 0:
-            print(f'{i = } | {px_value = }')
+    for i in range(-channels, out_size, channels):
+        index_pos = hash_pixel(px_value)
+        hash_array[index_pos][:] = px_value
+        if i >= 0:
             for j in range(channels):
                 pixel_data[i + j] = px_value[j]
 
