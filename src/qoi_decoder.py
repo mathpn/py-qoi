@@ -80,26 +80,22 @@ def decode(file_bytes: bytes):
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_INDEX:
-            # FIXME values from hash_array seem incorrect
-            print(f'{b1 = } | {px_value = } | {hash_array[b1] = }')
             px_value[:] = hash_array[b1]
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_DIFF:
-            for j in range(3):
-                px_value[j] = (px_value[j] + ((b1 >> 4) & 0x03) - 2) % 256
-                px_value[j] = (px_value[j] + ((b1 >> 2) & 0x03) - 2) % 256
-                px_value[j] = (px_value[j] + (b1 & 0x03) - 2) % 256
+            px_value[0] = (px_value[0] + ((b1 >> 4) & 0x03) - 2) % 256
+            px_value[1] = (px_value[1] + ((b1 >> 2) & 0x03) - 2) % 256
+            px_value[2] = (px_value[2] + (b1 & 0x03) - 2) % 256
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_LUMA:
             b2 = file_bytes[read_pos]
             read_pos += 1
-            vg = (b1 & 0x3f) - 32
-            for j in range(3):
-                px_value[j] = (px_value[j] + vg - 8 + ((b2 >> 4) & 0x0f)) % 256
-                px_value[j] = (px_value[j] + vg) % 256
-                px_value[j] = (px_value[j] + vg - 8 + (b2 & 0x0f)) % 256
+            vg = ((b1 & 0x3f) % 256) - 32
+            px_value[0] = (px_value[0] + vg - 8 + ((b2 >> 4) & 0x0f)) % 256
+            px_value[1] = (px_value[1] + vg) % 256
+            px_value[2] = (px_value[2] + vg - 8 + (b2 & 0x0f)) % 256
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_RUN:
