@@ -1,6 +1,7 @@
 import argparse
 import array
-from typing import Dict, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, Optional, Tuple
 
 from PIL import Image
 
@@ -18,31 +19,71 @@ QOI_MASK_2 = 0xc0  # 11000000
 QOI_MAGIC = ord('q') << 24 | ord('o') << 16 | ord('i') << 8 | ord('f')
 
 
-def hash_pixel(values) -> int:
-    r, g, b, a = values
-    return (r * 3 + g * 5 + b * 7 + a * 11) % 64
+@dataclass
+class Pixel:
+    px_bytes: bytearray = field(init=False)
+
+    def __post_init__(self):
+        self.px_bytes = bytearray((0, 0, 0, 255))
+
+    def update(self, values: bytes) -> None:
+        n_channels = len(values)
+        if n_channels not in (3, 4):
+            raise ValueError('a tuple of 3 or 4 values should be provided')
+
+        self.px_bytes[0:n_channels] = values
+
+    def __str__(self) -> str:
+        r, g, b, a = self.px_bytes
+        return f'R: {r} G: {g} B: {b} A: {a}'
+
+    @property
+    def bytes(self) -> bytes:
+        return bytes(self.px_bytes)
+
+    @property
+    def hash(self) -> int:
+        r, g, b, a = self.px_bytes
+        return (r * 3 + g * 5 + b * 7 + a * 11) % 64
+
+    @property
+    def red(self) -> int:
+        return self.px_bytes[0]
+
+    @property
+    def green(self) -> int:
+        return self.px_bytes[1]
+
+    @property
+    def blue(self) -> int:
+        return self.px_bytes[2]
+
+    @property
+    def alpha(self) -> int:
+        return self.px_bytes[3]
 
 
-def write_32_bits(value: int, array: bytearray, write_pos: int) -> int:
-    array[write_pos + 0] = (0xff000000 & value) >> 24
-    array[write_pos + 1] = (0x00ff0000 & value) >> 16
-    array[write_pos + 2] = (0x0000ff00 & value) >> 8
-    array[write_pos + 3] = (0x000000ff & value)
+
+def write_32_bits(value: int, data_array: bytearray, write_pos: int) -> int:
+    data_array[write_pos + 0] = (0xff000000 & value) >> 24
+    data_array[write_pos + 1] = (0x00ff0000 & value) >> 16
+    data_array[write_pos + 2] = (0x0000ff00 & value) >> 8
+    data_array[write_pos + 3] = (0x000000ff & value)
     return write_pos + 4
 
 
-def read_32_bits(array: bytearray, read_pos: int) -> Tuple[int, int]:
-    b1 = array[read_pos + 0]
-    b2 = array[read_pos + 1]
-    b3 = array[read_pos + 2]
-    b4 = array[read_pos + 3]
+def read_32_bits(data_array: bytearray, read_pos: int) -> Tuple[int, int]:
+    b1 = data_array[read_pos + 0]
+    b2 = data_array[read_pos + 1]
+    b3 = data_array[read_pos + 2]
+    b4 = data_array[read_pos + 3]
     read_pos += 4
     return b1 << 24 | b2 << 16 | b3 << 8 | b4, read_pos
 
 
-def write_end(array: bytearray, write_pos: int) -> int:
-    array[write_pos:write_pos + 7] = bytearray(0)
-    array[write_pos + 7] = 1
+def write_end(data_array: bytearray, write_pos: int) -> int:
+    data_array[write_pos:write_pos + 7] = bytearray(0)
+    data_array[write_pos + 7] = 1
     return write_pos + 8
 
 
@@ -73,11 +114,10 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
     total_size = height * width
     channels = 4 if alpha else 3
     pixel_data = (
-        tuple(img_bytes[i:i + channels])
-        for i in range(0, len(img_bytes), channels)
+        img_bytes[i:i + channels]for i in range(0, len(img_bytes), channels)
     )
     out_array = bytearray(14 + total_size * (5 if alpha else 4) + 8)
-    hash_array = [array.array('h', [0] * 4) for _ in range(64)]
+    hash_array = [Pixel() for _ in range(64)]
 
     # write header
     write_pos = 0
@@ -89,17 +129,12 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
 
     # encode pixels
     run = 0
-    prev_px_value = array.array('h', [0, 0, 0, 255])
-    px_value = array.array('h', [0, 0, 0, 255])
+    prev_px_value = Pixel()
+    px_value = Pixel()
     write_pos: int = 14
     for i, px in enumerate(pixel_data):
-        prev_px_value[:] = px_value
-
-        if len(px) == 4:
-            px_value = array.array('h', px)
-        else:
-            for j in range(3):
-                px_value[j] = px[j]
+        prev_px_value.update(px_value.bytes)
+        px_value.update(px)
 
         if px_value == prev_px_value:
             run += 1
@@ -114,25 +149,26 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
             write_pos += 1
             run = 0
 
-        index_pos = hash_pixel(px_value)
+        index_pos = px_value.hash
         if hash_array[index_pos] == px_value:
             out_array[write_pos] = QOI_OP_INDEX | index_pos
             write_pos += 1
             continue
 
-        hash_array[index_pos][:] = px_value
-        if px_value[3] != prev_px_value[3]:  # alpha channel
+        hash_array[index_pos].update(px_value.bytes)
+
+        if px_value.alpha != prev_px_value.alpha:
             out_array[write_pos] = QOI_OP_RGBA
-            out_array[write_pos + 1] = px_value[0]
-            out_array[write_pos + 2] = px_value[1]
-            out_array[write_pos + 3] = px_value[2]
-            out_array[write_pos + 4] = px_value[3]
+            out_array[write_pos + 1] = px_value.red
+            out_array[write_pos + 2] = px_value.green
+            out_array[write_pos + 3] = px_value.blue
+            out_array[write_pos + 4] = px_value.alpha
             write_pos += 5
             continue
 
-        vr = px_value[0] - prev_px_value[0]
-        vg = px_value[1] - prev_px_value[1]
-        vb = px_value[2] - prev_px_value[2]
+        vr = px_value.red - prev_px_value.red
+        vg = px_value.green - prev_px_value.green
+        vb = px_value.blue - prev_px_value.blue
 
         vg_r = vr - vg
         vg_b = vb - vg
@@ -148,9 +184,9 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
             continue
 
         out_array[write_pos] = QOI_OP_RGB
-        out_array[write_pos + 1] = px_value[0]
-        out_array[write_pos + 2] = px_value[1]
-        out_array[write_pos + 3] = px_value[2]
+        out_array[write_pos + 1] = px_value.red
+        out_array[write_pos + 2] = px_value.green
+        out_array[write_pos + 3] = px_value.blue
         write_pos += 4
 
     write_pos = write_end(out_array, write_pos)
@@ -167,17 +203,16 @@ def decode(file_bytes: bytes) -> Dict:
     colorspace = file_bytes[read_pos]
     read_pos += 1
 
-    hash_array = [array.array('h', [0, 0, 0, 255]) for _ in range(64)]
+    hash_array = [Pixel() for _ in range(64)]
     out_size = width * height * channels
     pixel_data = bytearray(out_size)
-    px_value = array.array('h', [0, 0, 0, 255])
+    px_value = Pixel()
     run = 0
     for i in range(-channels, out_size, channels):
-        index_pos = hash_pixel(px_value)
-        hash_array[index_pos][:] = px_value
+        index_pos = px_value.hash
+        hash_array[index_pos].update(px_value.bytes)
         if i >= 0:
-            for j in range(channels):
-                pixel_data[i + j] = px_value[j]
+            pixel_data[i:i + channels] = px_value.bytes
 
         if run > 0:
             run -= 1
@@ -190,35 +225,34 @@ def decode(file_bytes: bytes) -> Dict:
         read_pos += 1
 
         if b1 == QOI_OP_RGB:
-            for j in range(3):
-                px_value[j] = file_bytes[read_pos + j]
+            px_value.update(file_bytes[read_pos:read_pos + 3])
             read_pos += 3
             continue
 
         if b1 == QOI_OP_RGBA:
-            px_value[:] = array.array(
-                'h', tuple(file_bytes[read_pos:read_pos + 4])
-            )
+            px_value.update(file_bytes[read_pos:read_pos + 4])
             read_pos += 4
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_INDEX:
-            px_value[:] = hash_array[b1]
+            px_value.update(hash_array[b1].bytes)
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_DIFF:
-            px_value[0] = (px_value[0] + ((b1 >> 4) & 0x03) - 2) % 256
-            px_value[1] = (px_value[1] + ((b1 >> 2) & 0x03) - 2) % 256
-            px_value[2] = (px_value[2] + (b1 & 0x03) - 2) % 256
+            red = (px_value.red + ((b1 >> 4) & 0x03) - 2) % 256
+            green = (px_value.green + ((b1 >> 2) & 0x03) - 2) % 256
+            blue = (px_value.blue + (b1 & 0x03) - 2) % 256
+            px_value.update(bytes((red, green, blue)))
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_LUMA:
             b2 = file_bytes[read_pos]
             read_pos += 1
             vg = ((b1 & 0x3f) % 256) - 32
-            px_value[0] = (px_value[0] + vg - 8 + ((b2 >> 4) & 0x0f)) % 256
-            px_value[1] = (px_value[1] + vg) % 256
-            px_value[2] = (px_value[2] + vg - 8 + (b2 & 0x0f)) % 256
+            red = (px_value.red + vg - 8 + ((b2 >> 4) & 0x0f)) % 256
+            green = (px_value.green + vg) % 256
+            blue = (px_value.blue + vg - 8 + (b2 & 0x0f)) % 256
+            px_value.update(bytes((red, green, blue)))
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_RUN:
