@@ -301,7 +301,7 @@ def main():
     parser.add_argument('-d', '--decode', action='store_true', default=False)
     parser.add_argument(
         '-f', '--file-path', type=str,
-        help='path to image file to be encoded or decoded')
+        help='path to image file to be encoded or decoded', required=True)
     args = parser.parse_args()
 
     if args.encode:
