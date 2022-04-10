@@ -23,3 +23,12 @@ To decode a QOI image:
     python3 src/qoi.py -d -f image_file.qoi
 
 A file with name image_file.png will be saved on the same folder as the original image.
+
+
+    usage: qoi.py [-h] [-e] [-d] [-f FILE_PATH]
+    optional arguments:
+      -h, --help            show this help message and exit
+      -e, --encode
+      -d, --decode
+      -f FILE_PATH, --file-path FILE_PATH
+                            path to image file to be encoded or decoded
