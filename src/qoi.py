@@ -1,7 +1,6 @@
 import argparse
-import array
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 from PIL import Image
 
@@ -63,28 +62,58 @@ class Pixel:
         return self.px_bytes[3]
 
 
+class ByteWriter:
 
-def write_32_bits(value: int, data_array: bytearray, write_pos: int) -> int:
-    data_array[write_pos + 0] = (0xff000000 & value) >> 24
-    data_array[write_pos + 1] = (0x00ff0000 & value) >> 16
-    data_array[write_pos + 2] = (0x0000ff00 & value) >> 8
-    data_array[write_pos + 3] = (0x000000ff & value)
-    return write_pos + 4
+    def __init__(self, size: int):
+        self.bytes = bytearray(size)
+        self.write_pos = 0
 
+    def write(self, byte: int):
+        self.bytes[self.write_pos] = (byte % 256)
+        self.write_pos += 1
 
-def read_32_bits(data_array: bytearray, read_pos: int) -> Tuple[int, int]:
-    b1 = data_array[read_pos + 0]
-    b2 = data_array[read_pos + 1]
-    b3 = data_array[read_pos + 2]
-    b4 = data_array[read_pos + 3]
-    read_pos += 4
-    return b1 << 24 | b2 << 16 | b3 << 8 | b4, read_pos
+    def output(self):
+        return bytes(self.bytes[0:self.write_pos])
 
 
-def write_end(data_array: bytearray, write_pos: int) -> int:
-    data_array[write_pos:write_pos + 7] = bytearray(0)
-    data_array[write_pos + 7] = 1
-    return write_pos + 8
+class ByteReader:
+    padding_len = 8
+
+    def __init__(self, data: bytes):
+        self.bytes = data
+        self.read_pos = 0
+        # might be off by 1
+        self.max_pos = len(self.bytes) - self.padding_len
+
+    def read(self) -> Optional[int]:
+        if self.read_pos >= self.max_pos:
+            return None
+
+        out = self.bytes[self.read_pos]
+        self.read_pos += 1
+        return out
+
+    def output(self):
+        return bytes(self.bytes[0:self.read_pos])
+
+
+def write_32_bits(value: int, writer: ByteWriter) -> None:
+    writer.write((0xff000000 & value) >> 24)
+    writer.write((0x00ff0000 & value) >> 16)
+    writer.write((0x0000ff00 & value) >> 8)
+    writer.write((0x000000ff & value))
+
+
+def read_32_bits(reader: ByteReader) -> int:
+    data = [reader.read() for _ in range(4)]
+    b1, b2, b3, b4 = data
+    return b1 << 24 | b2 << 16 | b3 << 8 | b4
+
+
+def write_end(writer: ByteWriter) -> None:
+    for _ in range(7):
+        writer.write(0)
+    writer.write(1)
 
 
 def encode_img(img: Image.Image, srgb: bool, out_path: str) -> None:
@@ -116,22 +145,21 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
     pixel_data = (
         img_bytes[i:i + channels]for i in range(0, len(img_bytes), channels)
     )
-    out_array = bytearray(14 + total_size * (5 if alpha else 4) + 8)
+    max_n_bytes = 14 + total_size * (5 if alpha else 4) + 8
+    writer = ByteWriter(max_n_bytes)
     hash_array = [Pixel() for _ in range(64)]
 
     # write header
-    write_pos = 0
-    write_pos = write_32_bits(QOI_MAGIC, out_array, write_pos)
-    write_pos = write_32_bits(width, out_array, write_pos)
-    write_pos = write_32_bits(height, out_array, write_pos)
-    out_array[write_pos] = 4 if alpha else 3
-    out_array[write_pos + 1] = 0 if srgb else 1
+    write_32_bits(QOI_MAGIC, writer)
+    write_32_bits(width, writer)
+    write_32_bits(height, writer)
+    writer.write(4 if alpha else 3)
+    writer.write(0 if srgb else 1)
 
     # encode pixels
     run = 0
     prev_px_value = Pixel()
     px_value = Pixel()
-    write_pos: int = 14
     for i, px in enumerate(pixel_data):
         prev_px_value.update(px_value.bytes)
         px_value.update(px)
@@ -139,31 +167,27 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
         if px_value == prev_px_value:
             run += 1
             if run == 62 or (i + 1) >= total_size:
-                out_array[write_pos] = QOI_OP_RUN | (run - 1)
-                write_pos += 1
+                writer.write(QOI_OP_RUN | (run - 1))
                 run = 0
             continue
 
         if run:
-            out_array[write_pos] = QOI_OP_RUN | (run - 1)
-            write_pos += 1
+            writer.write(QOI_OP_RUN | (run - 1))
             run = 0
 
         index_pos = px_value.hash
         if hash_array[index_pos] == px_value:
-            out_array[write_pos] = QOI_OP_INDEX | index_pos
-            write_pos += 1
+            writer.write(QOI_OP_INDEX | index_pos)
             continue
 
         hash_array[index_pos].update(px_value.bytes)
 
         if px_value.alpha != prev_px_value.alpha:
-            out_array[write_pos] = QOI_OP_RGBA
-            out_array[write_pos + 1] = px_value.red
-            out_array[write_pos + 2] = px_value.green
-            out_array[write_pos + 3] = px_value.blue
-            out_array[write_pos + 4] = px_value.alpha
-            write_pos += 5
+            writer.write(QOI_OP_RGB)
+            writer.write(px_value.red)
+            writer.write(px_value.green)
+            writer.write(px_value.blue)
+            writer.write(px_value.alpha)
             continue
 
         vr = px_value.red - prev_px_value.red
@@ -174,34 +198,33 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
         vg_b = vb - vg
 
         if all(-3 < x < 2 for x in (vr, vg, vb)):
-            out_array[write_pos] = QOI_OP_DIFF | (vr + 2) << 4 | (vg + 2) << 2 | (vb + 2)
-            write_pos += 1
+            writer.write(QOI_OP_DIFF | (vr + 2) << 4 | (vg + 2) << 2 | (vb + 2))
             continue
+
         elif all(-9 < x < 8 for x in (vg_r, vg_b)) and -33 < vg < 32:
-            out_array[write_pos] = QOI_OP_LUMA | (vg + 32)
-            out_array[write_pos + 1] = (vg_r + 8) << 4 | (vg_b + 8)
-            write_pos += 2
+            writer.write(QOI_OP_LUMA | (vg + 32))
+            writer.write((vg_r + 8) << 4 | (vg_b + 8))
             continue
 
-        out_array[write_pos] = QOI_OP_RGB
-        out_array[write_pos + 1] = px_value.red
-        out_array[write_pos + 2] = px_value.green
-        out_array[write_pos + 3] = px_value.blue
-        write_pos += 4
+        writer.write(QOI_OP_RGB)
+        writer.write(px_value.red)
+        writer.write(px_value.green)
+        writer.write(px_value.blue)
 
-    write_pos = write_end(out_array, write_pos)
-    return out_array[0:write_pos]
+    write_end(writer)
+    return writer.output()
 
 
 def decode(file_bytes: bytes) -> Dict:
-    read_pos = 0
-    header_magic, read_pos = read_32_bits(file_bytes, read_pos)
-    width, read_pos = read_32_bits(file_bytes, read_pos)
-    height, read_pos = read_32_bits(file_bytes, read_pos)
-    channels = file_bytes[read_pos]
-    read_pos += 1
-    colorspace = file_bytes[read_pos]
-    read_pos += 1
+    reader = ByteReader(file_bytes)
+    header_magic = read_32_bits(reader)
+    if header_magic != QOI_MAGIC:
+        raise ValueError('provided image does not contain QOI header')
+
+    width = read_32_bits(reader)
+    height = read_32_bits(reader)
+    channels = reader.read()
+    colorspace = reader.read()
 
     hash_array = [Pixel() for _ in range(64)]
     out_size = width * height * channels
@@ -218,20 +241,18 @@ def decode(file_bytes: bytes) -> Dict:
             run -= 1
             continue
 
-        if read_pos >= len(file_bytes) - channels:
+        b1 = reader.read()
+        if b1 is None:
             break
 
-        b1 = file_bytes[read_pos]
-        read_pos += 1
-
         if b1 == QOI_OP_RGB:
-            px_value.update(file_bytes[read_pos:read_pos + 3])
-            read_pos += 3
+            new_value = bytes((reader.read() for _ in range(3)))
+            px_value.update(new_value)
             continue
 
         if b1 == QOI_OP_RGBA:
-            px_value.update(file_bytes[read_pos:read_pos + 4])
-            read_pos += 4
+            new_value = bytes((reader.read() for _ in range(4)))
+            px_value.update(new_value)
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_INDEX:
@@ -246,8 +267,7 @@ def decode(file_bytes: bytes) -> Dict:
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_LUMA:
-            b2 = file_bytes[read_pos]
-            read_pos += 1
+            b2 = reader.read()
             vg = ((b1 & 0x3f) % 256) - 32
             red = (px_value.red + vg - 8 + ((b2 >> 4) & 0x0f)) % 256
             green = (px_value.green + vg) % 256
