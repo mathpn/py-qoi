@@ -1,7 +1,7 @@
 import argparse
 from dataclasses import dataclass, field
 from typing import Dict, Optional
-
+import numpy as np
 from PIL import Image
 
 
@@ -117,6 +117,7 @@ def write_end(writer: ByteWriter) -> None:
 
 
 def encode_img(img: Image.Image, srgb: bool, out_path: str) -> None:
+    print("qoi encode_img")
     width, height = img.size
     if img.mode == 'RGBA':
         alpha = True
@@ -183,17 +184,19 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
         hash_array[index_pos].update(px_value.bytes)
 
         if px_value.alpha != prev_px_value.alpha:
-            writer.write(QOI_OP_RGB)
+            writer.write(QOI_OP_RGBA)
             writer.write(px_value.red)
             writer.write(px_value.green)
             writer.write(px_value.blue)
             writer.write(px_value.alpha)
             continue
 
-        vr = px_value.red - prev_px_value.red
-        vg = px_value.green - prev_px_value.green
-        vb = px_value.blue - prev_px_value.blue
-
+        prev_px_byte = np.array([prev_px_value.red, prev_px_value.green, prev_px_value.blue], dtype = np.dtype('i1'))
+        px_byte = np.array([px_value.red, px_value.green, px_value.blue], dtype = np.dtype('i1'))
+        vr = px_byte[0] - prev_px_byte[0]
+        vg = px_byte[1] - prev_px_byte[1]
+        vb = px_byte[2] - prev_px_byte[2]
+        
         vg_r = vr - vg
         vg_b = vb - vg
 
@@ -312,7 +315,7 @@ def main():
             return
 
         out_path = replace_extension(args.file_path, 'qoi')
-        encode_img(img, out_path, out_path)
+        encode_img(img, 0, out_path)
 
     if args.decode:
         with open(args.file_path, 'rb') as qoi:
