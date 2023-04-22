@@ -1,7 +1,11 @@
+"""
+QOI encoder and decoder script.
+"""
+
 import argparse
 from dataclasses import dataclass, field
 from typing import Dict, Optional
-import numpy as np
+
 from PIL import Image
 
 
@@ -9,13 +13,13 @@ from PIL import Image
 QOI_OP_INDEX = 0x00  # 00xxxxxx
 QOI_OP_DIFF = 0x40  # 01xxxxxx
 QOI_OP_LUMA = 0x80  # 10xxxxxx
-QOI_OP_RUN = 0xc0  # 11xxxxxx
-QOI_OP_RGB = 0xfe  # 11111110
-QOI_OP_RGBA = 0xff  # 11111111
-QOI_MASK_2 = 0xc0  # 11000000
+QOI_OP_RUN = 0xC0  # 11xxxxxx
+QOI_OP_RGB = 0xFE  # 11111110
+QOI_OP_RGBA = 0xFF  # 11111111
+QOI_MASK_2 = 0xC0  # 11000000
 
 
-QOI_MAGIC = ord('q') << 24 | ord('o') << 16 | ord('i') << 8 | ord('f')
+QOI_MAGIC = ord("q") << 24 | ord("o") << 16 | ord("i") << 8 | ord("f")
 
 
 @dataclass
@@ -28,13 +32,13 @@ class Pixel:
     def update(self, values: bytes) -> None:
         n_channels = len(values)
         if n_channels not in (3, 4):
-            raise ValueError('a tuple of 3 or 4 values should be provided')
+            raise ValueError("a tuple of 3 or 4 values should be provided")
 
         self.px_bytes[0:n_channels] = values
 
     def __str__(self) -> str:
         r, g, b, a = self.px_bytes
-        return f'R: {r} G: {g} B: {b} A: {a}'
+        return f"R: {r} G: {g} B: {b} A: {a}"
 
     @property
     def bytes(self) -> bytes:
@@ -63,17 +67,16 @@ class Pixel:
 
 
 class ByteWriter:
-
     def __init__(self, size: int):
         self.bytes = bytearray(size)
         self.write_pos = 0
 
     def write(self, byte: int):
-        self.bytes[self.write_pos] = (byte % 256)
+        self.bytes[self.write_pos] = byte % 256
         self.write_pos += 1
 
     def output(self):
-        return bytes(self.bytes[0:self.write_pos])
+        return bytes(self.bytes[0 : self.write_pos])
 
 
 class ByteReader:
@@ -94,14 +97,14 @@ class ByteReader:
         return out
 
     def output(self):
-        return bytes(self.bytes[0:self.read_pos])
+        return bytes(self.bytes[0 : self.read_pos])
 
 
 def write_32_bits(value: int, writer: ByteWriter) -> None:
-    writer.write((0xff000000 & value) >> 24)
-    writer.write((0x00ff0000 & value) >> 16)
-    writer.write((0x0000ff00 & value) >> 8)
-    writer.write((0x000000ff & value))
+    writer.write((0xFF000000 & value) >> 24)
+    writer.write((0x00FF0000 & value) >> 16)
+    writer.write((0x0000FF00 & value) >> 8)
+    writer.write((0x000000FF & value))
 
 
 def read_32_bits(reader: ByteReader) -> int:
@@ -118,43 +121,43 @@ def write_end(writer: ByteWriter) -> None:
 
 def encode_img(img: Image.Image, srgb: bool, out_path: str) -> None:
     width, height = img.size
-    if img.mode == 'RGBA':
+    if img.mode == "RGBA":
         alpha = True
-    elif img.mode == 'RGB':
+    elif img.mode == "RGB":
         alpha = False
     else:
-        raise ValueError(f'Image of non-supported mode: {img.mode}')
+        raise ValueError(f"Image of non-supported mode: {img.mode}")
     img_bytes = img.tobytes()
     output = encode(img_bytes, width, height, alpha, srgb)
 
-    with open(out_path, 'wb') as qoi:
+    with open(out_path, "wb") as qoi:
         qoi.write(output)
 
 
 def decode_to_img(img_bytes: bytes, out_path: str) -> None:
     out = decode(img_bytes)
 
-    size = (out['width'], out['height'])
-    img = Image.frombuffer(out['channels'], size, bytes(out['bytes']), 'raw')
-    img.save(out_path, 'png')
+    size = (out["width"], out["height"])
+    img = Image.frombuffer(out["channels"], size, bytes(out["bytes"]), "raw")
+    img.save(out_path, "png")
 
 
 def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
     total_size = height * width
     channels = 4 if alpha else 3
-    pixel_data = (
-        img_bytes[i:i + channels]for i in range(0, len(img_bytes), channels)
-    )
+    pixel_data = (img_bytes[i : i + channels] for i in range(0, len(img_bytes), channels))
     max_n_bytes = 14 + total_size * (5 if alpha else 4) + 8
     writer = ByteWriter(max_n_bytes)
     hash_array = [Pixel() for _ in range(64)]
+    for px in hash_array:
+        px.update(bytearray((0, 0, 0, 0)))
 
     # write header
     write_32_bits(QOI_MAGIC, writer)
     write_32_bits(width, writer)
     write_32_bits(height, writer)
     writer.write(4 if alpha else 3)
-    writer.write(0 if srgb else 1)
+    writer.write(1 if srgb else 0)
 
     # encode pixels
     run = 0
@@ -164,7 +167,7 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
         prev_px_value.update(px_value.bytes)
         px_value.update(px)
 
-        if px_value == prev_px_value:
+        if i > 0 and px_value == prev_px_value:
             run += 1
             if run == 62 or (i + 1) >= total_size:
                 writer.write(QOI_OP_RUN | (run - 1))
@@ -179,7 +182,6 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
         if hash_array[index_pos] == px_value:
             writer.write(QOI_OP_INDEX | index_pos)
             continue
-
         hash_array[index_pos].update(px_value.bytes)
 
         if px_value.alpha != prev_px_value.alpha:
@@ -190,12 +192,10 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
             writer.write(px_value.alpha)
             continue
 
-        prev_px_byte = np.array([prev_px_value.red, prev_px_value.green, prev_px_value.blue], dtype = np.dtype('i1'))
-        px_byte = np.array([px_value.red, px_value.green, px_value.blue], dtype = np.dtype('i1'))
-        vr = px_byte[0] - prev_px_byte[0]
-        vg = px_byte[1] - prev_px_byte[1]
-        vb = px_byte[2] - prev_px_byte[2]
-        
+        vr = px_value.red - prev_px_value.red
+        vg = px_value.green - prev_px_value.green
+        vb = px_value.blue - prev_px_value.blue
+
         vg_r = vr - vg
         vg_b = vb - vg
 
@@ -221,7 +221,7 @@ def decode(file_bytes: bytes) -> Dict:
     reader = ByteReader(file_bytes)
     header_magic = read_32_bits(reader)
     if header_magic != QOI_MAGIC:
-        raise ValueError('provided image does not contain QOI header')
+        raise ValueError("provided image does not contain QOI header")
 
     width = read_32_bits(reader)
     height = read_32_bits(reader)
@@ -237,7 +237,7 @@ def decode(file_bytes: bytes) -> Dict:
         index_pos = px_value.hash
         hash_array[index_pos].update(px_value.bytes)
         if i >= 0:
-            pixel_data[i:i + channels] = px_value.bytes
+            pixel_data[i : i + channels] = px_value.bytes
 
         if run > 0:
             run -= 1
@@ -270,40 +270,45 @@ def decode(file_bytes: bytes) -> Dict:
 
         if (b1 & QOI_MASK_2) == QOI_OP_LUMA:
             b2 = reader.read()
-            vg = ((b1 & 0x3f) % 256) - 32
-            red = (px_value.red + vg - 8 + ((b2 >> 4) & 0x0f)) % 256
+            vg = ((b1 & 0x3F) % 256) - 32
+            red = (px_value.red + vg - 8 + ((b2 >> 4) & 0x0F)) % 256
             green = (px_value.green + vg) % 256
-            blue = (px_value.blue + vg - 8 + (b2 & 0x0f)) % 256
+            blue = (px_value.blue + vg - 8 + (b2 & 0x0F)) % 256
             px_value.update(bytes((red, green, blue)))
             continue
 
         if (b1 & QOI_MASK_2) == QOI_OP_RUN:
-            run = (b1 & 0x3f)
+            run = b1 & 0x3F
 
     out = {
-        'width': width, 'height': height,
-        'channels': 'RGB' if channels == 3 else 'RGBA',
-        'colorspace': colorspace
+        "width": width,
+        "height": height,
+        "channels": "RGB" if channels == 3 else "RGBA",
+        "colorspace": colorspace,
     }
 
-    out['bytes'] = pixel_data
+    out["bytes"] = pixel_data
 
     return out
 
 
 def replace_extension(path: str, extension: str) -> str:
-    old_extension = path.split('.')[-1]
+    old_extension = path.split(".")[-1]
     new_path = path.replace(old_extension, extension)
     return new_path
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-e', '--encode', action='store_true', default=False)
-    parser.add_argument('-d', '--decode', action='store_true', default=False)
+    parser.add_argument("-e", "--encode", action="store_true", default=False)
+    parser.add_argument("-d", "--decode", action="store_true", default=False)
     parser.add_argument(
-        '-f', '--file-path', type=str,
-        help='path to image file to be encoded or decoded', required=True)
+        "-f",
+        "--file-path",
+        type=str,
+        help="path to image file to be encoded or decoded",
+        required=True,
+    )
     parser.add_argument("-s", "--srgb", action="store_true")
     args = parser.parse_args()
 
@@ -311,19 +316,19 @@ def main():
         try:
             img = Image.open(args.file_path)
         except Exception as exc:
-            print(f'image load failed: {exc}')
+            print(f"image load failed: {exc}")
             return
 
-        out_path = replace_extension(args.file_path, 'qoi')
+        out_path = replace_extension(args.file_path, "qoi")
         encode_img(img, args.srgb, out_path)
 
     if args.decode:
-        with open(args.file_path, 'rb') as qoi:
+        with open(args.file_path, "rb") as qoi:
             file_bytes = qoi.read()
 
-        out_path = replace_extension(args.file_path, 'png')
+        out_path = replace_extension(args.file_path, "png")
         decode_to_img(file_bytes, out_path)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
