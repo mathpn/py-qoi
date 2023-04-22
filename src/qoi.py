@@ -117,7 +117,6 @@ def write_end(writer: ByteWriter) -> None:
 
 
 def encode_img(img: Image.Image, srgb: bool, out_path: str) -> None:
-    print("qoi encode_img")
     width, height = img.size
     if img.mode == 'RGBA':
         alpha = True
@@ -305,6 +304,7 @@ def main():
     parser.add_argument(
         '-f', '--file-path', type=str,
         help='path to image file to be encoded or decoded', required=True)
+    parser.add_argument("-s", "--srgb", action="store_true")
     args = parser.parse_args()
 
     if args.encode:
@@ -315,7 +315,7 @@ def main():
             return
 
         out_path = replace_extension(args.file_path, 'qoi')
-        encode_img(img, 0, out_path)
+        encode_img(img, args.srgb, out_path)
 
     if args.decode:
         with open(args.file_path, 'rb') as qoi:
