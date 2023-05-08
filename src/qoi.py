@@ -229,6 +229,8 @@ def decode(file_bytes: bytes) -> Dict:
     colorspace = reader.read()
 
     hash_array = [Pixel() for _ in range(64)]
+    for px in hash_array:
+        px.update(bytearray((0, 0, 0, 0)))
     out_size = width * height * channels
     pixel_data = bytearray(out_size)
     px_value = Pixel()
