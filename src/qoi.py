@@ -192,12 +192,12 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
             writer.write(px_value.alpha)
             continue
 
-        vr = px_value.red - prev_px_value.red
-        vg = px_value.green - prev_px_value.green
-        vb = px_value.blue - prev_px_value.blue
+        vr = (256 + px_value.red - prev_px_value.red) % 256
+        vg = (256 + px_value.green - prev_px_value.green) % 256
+        vb = (256 + px_value.blue - prev_px_value.blue) % 256
 
-        vg_r = vr - vg
-        vg_b = vb - vg
+        vg_r = (256 + vr - vg) % 256
+        vg_b = (256 + vb - vg) % 256
 
         if all(-3 < x < 2 for x in (vr, vg, vb)):
             writer.write(QOI_OP_DIFF | (vr + 2) << 4 | (vg + 2) << 2 | (vb + 2))
@@ -296,7 +296,7 @@ def decode(file_bytes: bytes) -> Dict:
 
 def replace_extension(path: str, extension: str) -> str:
     old_extension = path.split(".")[-1]
-    new_path = path.replace(old_extension, extension)
+    new_path = path.replace("." + old_extension, "." + extension)
     return new_path
 
 
