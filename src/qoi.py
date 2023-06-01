@@ -192,12 +192,12 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
             writer.write(px_value.alpha)
             continue
 
-        vr = (256 + px_value.red - prev_px_value.red) % 256
-        vg = (256 + px_value.green - prev_px_value.green) % 256
-        vb = (256 + px_value.blue - prev_px_value.blue) % 256
+        vr = (384 + px_value.red - prev_px_value.red) % 256 - 128
+        vg = (384 + px_value.green - prev_px_value.green) % 256 - 128
+        vb = (384 + px_value.blue - prev_px_value.blue) % 256 - 128
 
-        vg_r = (256 + vr - vg) % 256
-        vg_b = (256 + vb - vg) % 256
+        vg_r = (384 + vr - vg) % 256 - 128
+        vg_b = (384 + vb - vg) % 256 - 128
 
         if all(-3 < x < 2 for x in (vr, vg, vb)):
             writer.write(QOI_OP_DIFF | (vr + 2) << 4 | (vg + 2) << 2 | (vb + 2))
