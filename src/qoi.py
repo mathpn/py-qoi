@@ -167,7 +167,7 @@ def encode(img_bytes: bytes, width: int, height: int, alpha: bool, srgb: bool):
         prev_px_value.update(px_value.bytes)
         px_value.update(px)
 
-        if i > 0 and px_value == prev_px_value:
+        if px_value == prev_px_value:
             run += 1
             if run == 62 or (i + 1) >= total_size:
                 writer.write(QOI_OP_RUN | (run - 1))
